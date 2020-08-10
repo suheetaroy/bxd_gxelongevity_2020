@@ -1,0 +1,305 @@
+---
+jupyter:
+  jupytext:
+    formats: ipynb,Rmd
+    text_representation:
+      extension: .Rmd
+      format_name: rmarkdown
+      format_version: '1.2'
+      jupytext_version: 1.4.2
+  kernelspec:
+    display_name: R
+    language: R
+    name: ir
+---
+
+```{r}
+#install.packages("lme4")
+#install.packages("tidyverse")
+#install.packages("vioplot")
+#install.packages("metafor")
+library(tidyverse)
+library(vioplot)
+library(lme4)
+library(metafor)
+```
+
+```{r}
+BXDagingbwt <- "../data/AgingBXDNOV2018dataSR2.csv"
+agingbxd <- read.csv(BXDagingbwt)
+names(agingbxd)
+```
+
+```{r}
+summarizeByDiet <- function(data,pheno,nmin=3)
+    {
+    strainByDiet <- group_by(data,DietCode,StrainNameCurrent) %>%
+          summarize(n=n()) %>%
+          pivot_wider(id_cols = "StrainNameCurrent",names_from = "DietCode",values_from = "n")
+    strainsWithnmin <- filter(strainByDiet,CD>nmin) %>% filter(HF>nmin) %>% select(StrainNameCurrent)
+    newdata <- filter(data,StrainNameCurrent %in% strainsWithnmin$StrainNameCurrent) %>%
+             mutate(StrainNameCurrent=fct_drop(fct_explicit_na((StrainNameCurrent))))
+    
+    # lm
+    outLM <- lm(formula(paste(pheno,"~DietCode+StrainNameCurrent")),data=newdata)
+    # lmx
+    outLMX <- lm(formula(paste(pheno,"~DietCode*StrainNameCurrent")),data=newdata)
+    # lmm
+    outLMM <- lmer(formula(paste(pheno,"~DietCode+(1+DietCode|StrainNameCurrent)")),data=newdata)
+    summary(outLMM)
+    # meta analysis
+    pheno <- as.name(pheno)
+    strainByDiet <- group_by(newdata,DietCode,StrainNameCurrent) %>% 
+                summarize(n:=sum(!is.na( {{ pheno }}  )),
+                          mean:=mean( {{ pheno }},na.rm=T),
+                          sd := sd( {{ pheno }},na.rm=T)) %>%
+                mutate(se=sd/sqrt(n)) %>%
+                pivot_wider(id_cols = "StrainNameCurrent",
+                            names_from = c("DietCode"),values_from = c("n","mean","sd"))
+
+   outMeta <- rma.uni(measure="MD",m1i=mean_HF,m2i=mean_CD,
+                      sd1i=sd_HF,sd2i=sd_CD,n1i=n_HF,n2i=n_CD,
+                      data=strainByDiet)
+    
+    lmtab <- as_tibble(coef(summary(outLM)),rownames="coefname") %>% filter(!grepl("Strain",coefname))
+    av <- anova(outLM)
+    avpct <- round(1000*av[,2]/sum(av[,2]))/10
+    names(avpct) <- rownames(av)
+    lmxtab <- as_tibble(coef(summary(outLMX)),rownames="coefname") %>%    filter(!grepl("Strain",coefname))
+    avx <- anova(outLMX)
+    avxpct <- round(1000*avx[,2]/sum(avx[,2]))/10
+    names(avxpct) <- rownames(avx)
+    lmmtab <- coef(summary(outLMM))
+    metatab <- coef(summary(outMeta))
+    rownames(metatab) <- "DietCodeHF"
+    
+    cat("\n --- ANOVA --- \n")
+    print(avpct)
+    cat("\n --- LM --- \n")
+    print(lmtab)
+    cat("\n --- ANOVAX --- \n")
+    print(avxpct)
+    cat("\n --- LMX --- \n")
+    print(lmxtab)
+    cat("\n --- LMM --- \n")
+    print(lmmtab)
+    cat("\n --- Meta --- \n")
+    print(metatab)
+
+   list(outLM=outLM,outLMX=outLMX,outLMM=outLMM,outMeta=outMeta)
+}
+
+out <- summarizeByDiet(agingbxd,"AgeAtDeath")
+```
+
+```{r}
+summarizeByCovariate <- function(data,pheno,cov,nmin=3)
+    {
+    covname <- as.name(cov)
+
+    byStrain <- group_by(data,StrainNameCurrent) %>%
+          summarize(n=n())
+    strainsWithnmin <- filter(byStrain,n>nmin) %>% select(StrainNameCurrent)
+    newdata <- filter(data,StrainNameCurrent %in% strainsWithnmin$StrainNameCurrent) %>%
+             mutate(StrainNameCurrent=fct_drop(fct_explicit_na((StrainNameCurrent))))
+    
+    # lm
+    outLM <- lm(formula(paste(pheno,"~",cov)),data=newdata)
+    # lmm
+    outLMM <- lmer(formula(paste(pheno,"~",cov,"+(1|StrainNameCurrent)")),data=newdata)
+    # meta analysis
+    covLM <- function(df)
+        {
+        lm(formula(paste(pheno,"~",cov)),data=df)
+        }
+    pheno <- as.name(pheno)
+    strainByCov <- group_by(newdata,StrainNameCurrent) %>% 
+                   nest() %>% 
+                   mutate(lmresult=map(data,covLM)) %>%
+                   mutate(beta=map(lmresult,broom::tidy)) %>% 
+                   unnest(beta) %>%
+                   filter(term==cov)
+    outMeta <- rma.uni(yi=strainByCov$estimate,sei=strainByCov$std.error)
+
+    lmtab <- as_tibble(coef(summary(outLM)),rownames="coefname") %>% filter(!grepl("Strain",coefname))
+    av <- anova(outLM)
+    avpct <- round(1000*av[,2]/sum(av[,2]))/10
+    names(avpct) <- rownames(av)
+    lmmtab <- coef(summary(outLMM))
+    metatab <- coef(summary(outMeta))
+    rownames(metatab) <- cov
+    
+    cat("\n --- ANOVA --- \n")
+    print(avpct)
+    cat("\n --- LM --- \n")
+    print(lmtab)
+    cat("\n --- LMM --- \n")
+    print(lmmtab)
+    cat("\n --- Meta --- \n")
+    print(metatab)
+
+   
+   list(outLM=outLM,outLMM=outLMM,outMeta=outMeta)
+}
+out <- summarizeByCovariate(agingbxd,"AgeAtDeath","Weight02")
+```
+
+```{r}
+summarizeByCovariate2 <- function(data,pheno,cov,backCov,nmin=3)
+    {
+    covname <- as.name(cov)
+
+    byStrain <- group_by(data,StrainNameCurrent) %>%
+          summarize(n=n())
+    strainsWithnmin <- filter(byStrain,n>nmin) %>% select(StrainNameCurrent)
+    newdata <- filter(data,StrainNameCurrent %in% strainsWithnmin$StrainNameCurrent) %>%
+             mutate(StrainNameCurrent=fct_drop(fct_explicit_na((StrainNameCurrent))))
+    
+    # lm
+    outLM <- lm(formula(paste(pheno,"~",cov,"+",backCov,"+StrainNameCurrent")),data=newdata)
+    # lmm
+    outLMM <- lmer(formula(paste(pheno,"~",cov,"+",backCov,"+(1|StrainNameCurrent)")),data=newdata)
+    # meta analysis
+    covLM <- function(df)
+        {
+        lm(formula(paste(pheno,"~",cov,"+",backCov)),data=df)
+        }
+    pheno <- as.name(pheno)
+    strainByCov <- group_by(newdata,StrainNameCurrent) %>% 
+                   nest() %>% 
+                   mutate(lmresult=map(data,covLM)) %>%
+                   mutate(beta=map(lmresult,broom::tidy)) %>% 
+                   unnest(beta) %>%
+                   filter(grepl(cov,term))
+    outMeta <- rma.uni(yi=strainByCov$estimate,sei=strainByCov$std.error)
+                   
+
+   # outMeta <- rma.uni(measure="MD",m1i=mean_HF,m2i=mean_CD,
+   #                   sd1i=sd_HF,sd2i=sd_CD,n1i=n_HF,n2i=n_CD,
+   #                   data=strainByDiet)
+    lmtab <- as_tibble(coef(summary(outLM)),rownames="coefname") %>% filter(!grepl("Strain",coefname))
+    av <- anova(outLM)
+    avpct <- round(1000*av[,2]/sum(av[,2]))/10
+    names(avpct) <- rownames(av)
+    lmmtab <- coef(summary(outLMM))
+    metatab <- coef(summary(outMeta))
+    rownames(metatab) <- cov
+    
+    cat("\n --- ANOVA --- \n")
+    print(avpct)
+    cat("\n --- LM --- \n")
+    print(lmtab)
+    cat("\n --- LMM --- \n")
+    print(lmmtab)
+    cat("\n --- Meta --- \n")
+    print(metatab)
+   list(outLM=outLM,outLMM=outLMM,outMeta=outMeta)
+}
+out <- summarizeByCovariate2(agingbxd,"AgeAtDeath","Weight06","DietCode",20)
+
+```
+
+## Looking at the effect of diet on longevity across all strains and adjusting for strain effect
+```{r dieteffect}
+out1 <- summarizeByDiet(agingbxd,"AgeAtDeath")
+summary(out1$outMeta)
+```
+
+## Age at entry into colony and start of HFD is not associated with longevity adjusting for strain effect
+```{r entryage}
+out2 <- summarizeByCovariate(agingbxd,"AgeAtDeath","EntryAgeInColony")
+```
+
+## Looking at the effect of initial weight at entry into aging colony on longevity adjusting for age at entry into colony
+```{r initialweighteffect}
+out3 <- summarizeByCovariate2(agingbxd,"AgeAtDeath","Weight00Baseline","EntryAgeInColony",4)
+summary(out3$outMeta)
+```
+
+## Looking at the effect of body weight at 100 days on both diets on longevity adjusting for strain effect
+```{r earlyweighteffect}
+out4 <- summarizeByCovariate(agingbxd,"AgeAtDeath","Weight02")
+summary(out4$outMeta)
+```
+
+## Looking at the effect of body weight gain on longevity at 100 days on HFD 
+```{r earlyHFDwtgain effect}
+hfd <- subset(agingbxd, (agingbxd)$DietCode=='HF')
+out5 <- summarizeByCovariate(hfd,"AgeAtDeath","WeightGainPost100days",10)
+summary(out5$outLM)
+```
+
+## Looking at the effect of body weight on longevity at 400 days on CD 
+```{r lateCDwt effect}
+cd <- subset(agingbxd, (agingbxd)$DietCode=='CD')
+out6 <- summarizeByCovariate(cd,"AgeAtDeath","Weight06", 10)
+summary(out6$outMeta)
+```
+
+## Looking at the effect of body weight on longevity at 400 days on HFD 
+```{r lateHFDwt effect}
+hfd <- subset(agingbxd, (agingbxd)$DietCode=='HF')
+out7 <- summarizeByCovariate(hfd,"AgeAtDeath","Weight06", 11)
+summary(out7$outMeta)
+```
+
+## Looking at the effect of body weight gain on longevity at 400 days on HFD
+```{r lateHFDwtgain effect}
+hfd <- subset(agingbxd, (agingbxd)$DietCode=='HF')
+out8 <- summarizeByCovariate(hfd,"AgeAtDeath","WeightGainPost400days",11)
+summary(out8$outMeta)
+```
+
+## Looking at the effect of diet on body weight at 400 days adjusting for strain effect
+```{r dietwteffect}
+out9 <- summarizeByDiet(agingbxd,"Weight06")
+summary(out9$outMeta)
+```
+
+## Fat mass and Adiposity in harvested BXD females
+```{r}
+BXDagingfat <- "../data/AgingBXDharvest_FatMass.csv"
+agingbxdfat <- read.csv(BXDagingfat)
+names(agingbxdfat)
+```
+
+## Looking at the effect of adiposity in harvested females on longevity adjusting for diet and strain effect
+```{r fateffect}
+out10 <- summarizeByCovariate2(agingbxdfat,"AgeAtDeath","Total.Adiposity","DietCode", 10)
+summary(out10$outMeta)
+out11 <- summarizeByCovariate2(agingbxdfat,"AgeAtDeath","Visceral.Adiposity","DietCode", 10)
+summary(out11$outMeta)
+out12 <- summarizeByCovariate2(agingbxdfat,"AgeAtDeath","Subq.Adiposity","DietCode", 10)
+summary(out12$outMeta)
+```
+
+## Blood metabolites in harvested BXD females
+```{r}
+BXDagingmet <- "../data/AgingBXD_harvestedfemales_BloodMetabolites_SR.csv"
+agingbxdmetab <- read.csv(BXDagingmet)
+names(agingbxdmetab)
+```
+
+## Looking at the effect of blood metabolites in harvested females on longevity adjusting for diet and strain effect
+```{r metabeffect}
+out13 <- summarizeByCovariate2(agingbxdmetab,"AgeAtDeath","Glucose","DietCode", 10)
+summary(out13$outMeta)
+out14 <- summarizeByCovariate2(agingbxdmetab,"AgeAtDeath","TotalChol","DietCode", 10)
+summary(out14$outMeta)
+out15 <- summarizeByCovariate2(agingbxdmetab,"AgeAtDeath","Triglycerides","DietCode", 10)
+summary(out15$outMeta)
+out16 <- summarizeByCovariate2(agingbxdmetab,"AgeAtDeath","FFA","DietCode", 10)
+summary(out16$outMeta)
+```
+
+## Looking at the effect of blood metabolites in harvested females on body weight adjusting for diet and strain effect
+```{r metabeffect}
+out13a <- summarizeByCovariate2(agingbxdmetab,"WeightBody","Glucose","DietCode", 10)
+summary(out13a$outMeta)
+out14a <- summarizeByCovariate2(agingbxdmetab,"WeightBody","TotalChol","DietCode", 10)
+summary(out14a$outMeta)
+out15a <- summarizeByCovariate2(agingbxdmetab,"WeightBody","Triglycerides","DietCode", 10)
+summary(out15a$outMeta)
+out16a <- summarizeByCovariate2(agingbxdmetab,"WeightBody","FFA","DietCode", 10)
+summary(out16a$outMeta)
+```
