@@ -2,4 +2,4 @@
 
 Data files are in the `data` directory.
 
-R code file is in the `code` directory.
+R code file is in the `scripts` directory.
