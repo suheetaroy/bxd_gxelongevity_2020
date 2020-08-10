@@ -293,7 +293,7 @@ summary(out16$outMeta)
 ```
 
 ## Looking at the effect of blood metabolites in harvested females on body weight adjusting for diet and strain effect
-```{r metabeffect}
+```{r metabwteffect}
 out13a <- summarizeByCovariate2(agingbxdmetab,"WeightBody","Glucose","DietCode", 10)
 summary(out13a$outMeta)
 out14a <- summarizeByCovariate2(agingbxdmetab,"WeightBody","TotalChol","DietCode", 10)
