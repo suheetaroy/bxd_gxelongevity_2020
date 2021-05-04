@@ -1,0 +1,99 @@
+---
+title: "BXDharvest_LuminexSerumMetabolites"
+author: "Suheeta Roy"
+date: "3/15/2021"
+output: html_document
+---
+
+## Luminex serum metabolites
+```{r readBXDlumnxmetabolites}
+## set figure options)
+options(repr.plot.width = 6, repr.plot.height = 6)
+## load library
+library(tidyverse)
+BXDlumnxmetabolites <- "../data/AgingBXD_Metabolites_LuminexData_Dec2020.csv"
+BXDlumnxmetab <- read.csv(BXDlumnxmetabolites)
+names(BXDlumnxmetab)
+nrow(BXDlumnxmetab)
+```
+
+## Plotting Serum Metabolite levels on each diet
+```{r stripplotlumnx}
+mycolors<- c("#E30613","#312783")
+stripchart(BXDlumnxmetab$logInsulin ~BXDlumnxmetab$DietCode, vertical=TRUE, method="jitter",pch=19, cex=0.5,col= mycolors, xlab= "Diets", ylab= "Serum Insulin ( log2 pg/mL)")
+mediang <- tapply(BXDlumnxmetab$logInsulin, BXDlumnxmetab$DietCode, median,na.rm=T)
+loc <- 1:length(mediang)
+segments(loc-0.3, mediang, loc+0.3, mediang, col="black", lwd=3)
+stripchart(BXDlumnxmetab$HOMA.IR ~BXDlumnxmetab$DietCode, vertical=TRUE, method="jitter",pch=19, cex=0.5,col= mycolors, xlab= "Diets", ylab= "HOMA-IR")
+mediang <- tapply(BXDlumnxmetab$HOMA.IR, BXDlumnxmetab$DietCode, median,na.rm=T)
+loc <- 1:length(mediang)
+segments(loc-0.3, mediang, loc+0.3, mediang, col="black", lwd=3)
+stripchart(BXDlumnxmetab$logLeptin ~BXDlumnxmetab$DietCode, vertical=TRUE, method="jitter",pch=19, cex=0.5,col= mycolors, xlab= "Diets", ylab= "Serum Leptin (log2 pg/mL)")
+mediang <- tapply(BXDlumnxmetab$logLeptin, BXDlumnxmetab$DietCode, median,na.rm=T)
+loc <- 1:length(mediang)
+segments(loc-0.3, mediang, loc+0.3, mediang, col="black", lwd=3)
+stripchart(BXDlumnxmetab$logCpeptide ~BXDlumnxmetab$DietCode, vertical=TRUE, method="jitter",pch=19, cex=0.5,col= mycolors, xlab= "Diets", ylab= "Serum C-peptide (log2 pg/mL)")
+mediang <- tapply(BXDlumnxmetab$logCpeptide, BXDlumnxmetab$DietCode, median,na.rm=T)
+loc <- 1:length(mediang)
+segments(loc-0.3, mediang, loc+0.3, mediang, col="black", lwd=3)
+```
+
+## T tests for serum metabolites (luminex)
+```{r ttest}
+t.test(logInsulin~DietCode,data=BXDlumnxmetab)
+t.test(logLeptin~DietCode, data= BXDlumnxmetab)
+t.test(logCpeptide~DietCode, data= BXDlumnxmetab)
+t.test(HOMA.IR~DietCode, data= BXDlumnxmetab)
+```
+
+## Looking at correlation between age at death, insulin and diet using linear regression (Chow diet= red, High fat diet= blue)
+```{r regressionins}
+mycolors<- c("CD"= "#E30613", "HFD"= "#312783")
+## Correlation between age at death and serum insulin at harvest
+out5<- lm(AgeAtDeath~logInsulin + DietCode, data= BXDlumnxmetab)
+summary(out5)
+out5a<- lm(AgeAtDeath~logInsulin, subset= BXDlumnxmetab$DietCode== 'CD', data= BXDlumnxmetab)
+summary(out5a)
+out5b<- lm(AgeAtDeath~logInsulin, subset= BXDlumnxmetab$DietCode== 'HF', data= BXDlumnxmetab)
+summary(out5b)
+plot( BXDlumnxmetab$AgeAtDeath,BXDlumnxmetab$logInsulin, ylab= "Serum Insulin log2 (pg/mL)", xlab= "Age At Death (Days)",pch=21, cex=0.8, col= "white", bg= mycolors[BXDlumnxmetab$DietCode])
+```
+
+## Looking at correlation between age at death, HOMA-IR and diet using linear regression (Chow diet= red, High fat diet= blue)
+```{r regressionhoma}
+mycolors<- c("CD"= "#E30613", "HFD"= "#312783")
+## Correlation between age at death and HOMA-IR at harvest
+out6<- lm(AgeAtDeath~HOMA.IR + DietCode, data= BXDlumnxmetab)
+summary(out6)
+out6a<- lm(AgeAtDeath~HOMA.IR, subset= BXDlumnxmetab$DietCode== 'CD', data= BXDlumnxmetab)
+summary(out6a)
+out6b<- lm(AgeAtDeath~HOMA.IR, subset= BXDlumnxmetab$DietCode== 'HF', data= BXDlumnxmetab)
+summary(out6b)
+plot( BXDlumnxmetab$AgeAtDeath,BXDlumnxmetab$HOMA.IR, ylab= "HOMA-IR", xlab= "Age At Death (Days)",pch=21, cex=0.8, col= "white", bg= mycolors[BXDlumnxmetab$DietCode])
+```
+
+## Looking at correlation between age at death, leptin and diet using linear regression (Chow diet= red, High fat diet= blue)
+```{r regressionlep}
+mycolors<- c("CD"= "#E30613", "HFD"= "#312783")
+## Correlation between age at death and serum leptin at harvest
+out7<- lm(AgeAtDeath~logLeptin + DietCode, data= BXDlumnxmetab)
+summary(out7)
+out7a<- lm(AgeAtDeath~logLeptin, subset= BXDlumnxmetab$DietCode== 'CD', data= BXDlumnxmetab)
+summary(out7a)
+out7b<- lm(AgeAtDeath~logLeptin, subset= BXDlumnxmetab$DietCode== 'HF', data= BXDlumnxmetab)
+summary(out7b)
+plot(BXDlumnxmetab$AgeAtDeath, BXDlumnxmetab$logLeptin, ylab= "Serum Leptin log2 (pg/mL)", xlab= "Age At Death (Days)",pch=21, cex=0.8, col= "white", bg= mycolors[BXDlumnxmetab$DietCode])
+```
+
+## Looking at correlation between age at death, c-peptide2 and diet using linear regression (Chow diet= red, High fat diet= blue)
+```{r regressioncpep}
+mycolors<- c("CD"= "#E30613", "HFD"= "#312783")
+## Correlation between age at death and serum c-peptide2 at harvest
+out8<- lm(AgeAtDeath~logCpeptide + DietCode, data= BXDlumnxmetab)
+summary(out8)
+out8a<- lm(AgeAtDeath~logCpeptide, subset= BXDlumnxmetab$DietCode== 'CD', data= BXDlumnxmetab)
+summary(out8a)
+out8b<- lm(AgeAtDeath~logCpeptide, subset= BXDlumnxmetab$DietCode== 'HF', data= BXDlumnxmetab)
+summary(out8b)
+plot(BXDlumnxmetab$AgeAtDeath, BXDlumnxmetab$logCpeptide, ylab= "Serum C-peptide log2 (pg/mL)", xlab= "Age At Death (Days)",pch=21, cex=0.8, col= "white", bg= mycolors[BXDlumnxmetab$DietCode])
+```
