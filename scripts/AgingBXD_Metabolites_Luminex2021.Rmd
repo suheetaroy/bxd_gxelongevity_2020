@@ -1,0 +1,128 @@
+---
+title: "AgingBXD_Metabolites_Luminex2021"
+output: html_document
+---
+
+## Luminex serum metabolites
+```{r readBXDlumnxmetabolites}
+## set figure options)
+options(repr.plot.width = 6, repr.plot.height = 6)
+## load library
+library(tidyverse)
+BXDlumnxmetabolites <- "../data/AgingBXD_Metabolites_Luminex2021_SR.csv"
+luminex <- read.csv(BXDlumnxmetabolites)
+names(luminex)
+nrow(luminex)
+```
+```{r transformations}
+luminex <- mutate(luminex,
+                  LogInsulin = log(Insulin),
+                  LogLeptin = log(Leptin),
+                  LogC.peptide = log(C.peptide),
+                  LogHOMA.IR = log(HOMA.IR+1))
+```
+
+## T tests for serum hormones (luminex)
+```{r ttest}
+t.test(LogInsulin~DietCode,data=luminex)
+t.test(LogLeptin~DietCode, data=luminex)
+t.test(LogC.peptide~DietCode, data=luminex)
+t.test(LogHOMA.IR~DietCode, data=luminex)
+```
+
+## Plotting serum hormone levels on each diet
+
+```{r lumnxmetabplot}
+library(vioplot)
+mycolors<- c("#E30613","#312783")
+pdf(file= "vioplot_logInsulin.pdf")
+vioplot(luminex$LogInsulin ~luminex$DietCode,col= c("tomato", "royalblue"), xlab= "Diets", ylab= "Serum Insulin (log pg/mL)")
+mediang <- tapply(luminex$LogInsulin, luminex$DietCode, median,na.rm=T)
+dev.off()
+pdf(file= "vioplot_logHOMAIR.pdf")
+vioplot(luminex$LogHOMA.IR ~luminex$DietCode,col= c("tomato", "royalblue"), xlab= "Diets", ylab= " Log (HOMA-IR)")
+mediang <- tapply(luminex$LogHOMA.IR, luminex$DietCode, median,na.rm=T)
+dev.off()
+pdf(file= "vioplot_logLeptin.pdf")
+vioplot(luminex$LogLeptin ~luminex$DietCode,col= c("tomato", "royalblue"), xlab= "Diets", ylab= "Serum Leptin (log pg/mL)")
+mediang <- tapply(luminex$LogLeptin,luminex$DietCode, median,na.rm=T)
+dev.off()
+pdf(file= "vioplot_logCpeptide.pdf")
+vioplot(luminex$LogC.peptide ~luminex$DietCode,col= c("tomato", "royalblue"), xlab= "Diets", ylab= "Serum C-peptide (log pg/mL)")
+mediang <- tapply(luminex$LogC.peptide, BXDlumnxmetab$DietCode, median,na.rm=T)
+dev.off()
+```
+
+## Effect of serum hormones on age at death and final body weight on each diet adjusting for strain effect
+
+```{r summarizeByCovariate2}
+summarizeByCovariate2 <- function(data,pheno,cov,backCov,nmin=3)
+    {
+    covname <- as.name(cov)
+
+    byStrain <- group_by(data,StrainNameCurrent) %>%
+          summarize(n=n())
+    strainsWithnmin <- filter(byStrain,n>nmin) %>% select(StrainNameCurrent)
+    newdata <- filter(data,StrainNameCurrent %in% strainsWithnmin$StrainNameCurrent) %>%
+             mutate(StrainNameCurrent=fct_drop(fct_explicit_na((StrainNameCurrent))))
+    
+    # lm
+    outLM <- lm(formula(paste(pheno,"~",cov,"+",backCov,"+StrainNameCurrent")),data=newdata)
+    # lmm
+    outLMM <- lmer(formula(paste(pheno,"~",cov,"+",backCov,"+(1|StrainNameCurrent)")),data=newdata)
+    # meta analysis
+    covLM <- function(df)
+        {
+        lm(formula(paste(pheno,"~",cov,"+",backCov)),data=df)
+        }
+    pheno <- as.name(pheno)
+    strainByCov <- group_by(newdata,StrainNameCurrent) %>% 
+                   nest() %>% 
+                   mutate(lmresult=map(data,covLM)) %>%
+                   mutate(beta=map(lmresult,broom::tidy)) %>% 
+                   unnest(beta) %>%
+                   filter(grepl(cov,term))
+    outMeta <- rma.uni(yi=strainByCov$estimate,sei=strainByCov$std.error)
+                   
+
+   # outMeta <- rma.uni(measure="MD",m1i=mean_HF,m2i=mean_CD,
+   #                   sd1i=sd_HF,sd2i=sd_CD,n1i=n_HF,n2i=n_CD,
+   #                   data=strainByDiet)
+    lmtab <- as_tibble(coef(summary(outLM)),rownames="coefname") %>% filter(!grepl("Strain",coefname))
+    av <- anova(outLM)
+    avpct <- round(1000*av[,2]/sum(av[,2]))/10
+    names(avpct) <- rownames(av)
+    lmmtab <- coef(summary(outLMM))
+    metatab <- coef(summary(outMeta))
+    rownames(metatab) <- cov
+    
+    cat("\n --- ANOVA --- \n")
+    print(avpct)
+    cat("\n --- LM --- \n")
+    print(lmtab)
+    cat("\n --- LMM --- \n")
+    print(lmmtab)
+    cat("\n --- Meta --- \n")
+    print(metatab)
+   list(outLM=outLM,outLMM=outLMM,outMeta=outMeta)
+}
+
+```
+
+```{r splitByDiet}
+luminexCD = filter(luminex,DietCode=="CD")
+luminexHF = filter(luminex,DietCode=="HF")
+```
+
+```{r summarize}
+outInsulinHFAge <- summarizeByCovariate2(luminexHF,"LogInsulin","AgeAtDeath","Plate",4)
+outInsulinHFBW <- summarizeByCovariate2(luminexHF,"LogInsulin","BodyWeight","Plate",4)
+outLeptinHFAge <- summarizeByCovariate2(luminexHF,"LogLeptin","AgeAtDeath","Plate",4)
+outLeptinHFBW <- summarizeByCovariate2(luminexHF,"LogC.peptide","BodyWeight","Plate",4)
+outCpeptideHFAge <- summarizeByCovariate2(luminexHF,"LogC.peptide","AgeAtDeath","Plate",4)
+outCpeptideHFBW <- summarizeByCovariate2(luminexHF,"LogLeptin","BodyWeight","Plate",4)
+outHOMAIRHFAge <- summarizeByCovariate2(luminexHF,"LogHOMA.IR","AgeAtDeath","Plate",4)
+outHOMAIRHFBW <- summarizeByCovariate2(luminexHF,"LogHOMA.IR","BodyWeight","Plate",4)
+
+
+```
